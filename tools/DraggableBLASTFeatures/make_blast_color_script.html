@@ -1,17 +1,288 @@
 <!DOCTYPE html>
-<html>
+<html ng-app="app">
 <head>
 <meta charset="utf-8" />
+<title>bitscore_color script generator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Jbrowse BLAST color table tool</title>
 <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css">
+<link rel="stylesheet" href="http://rawgit.com/claviska/jquery-minicolors/master/jquery.minicolors.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.1.0/codemirror.min.css">
+<style>
+.color-item {
+    margin: 5px;
+}
+
+.CodeMirror {
+    height: auto;
+}
+
+#score-color {
+    display: inline-block;
+    position: relative;
+    margin-top: 10px;
+}
+
+#score-color-canvas {
+    border-radius: 5px;
+    cursor: none;
+}
+
+#score-color-rule {
+    position: absolute;
+    top: 0px;
+    left: 50px;
+    height: 30px;
+    width: 0px;
+    border-right: 1px solid #FFF;
+    text-align: right;
+    cursor: none;
+}
+
+#score-color-rule-text {
+    position: relative;
+    top: -20px;
+}
+
+.axis path,
+.axis line {
+    fill: none;
+    stroke: grey;
+    stroke-width: 1;
+    shape-rendering: crispEdges;
+}
+</style>
+</head>
+
+<body class="container">
+<div class="jumbotron">
+    <h1>bitscore_color script generator</h1>
+    <h3>by <a href="https://github.com/hotdogee">Han Lin</a></h3>
+</div>
+<div ng-controller="AppCtrl">
+    <h1>Settings</h1>
+    <form class="form">
+        <div class="row">
+            <div class="form-group col-sm-4">
+                <label for="minScore">Min Score</label>
+                <input type="number" class="form-control" id="minScore" min="0" placeholder="Min Score" ng-model="minScore">
+            </div>
+        </div>
+        <div class="row">
+            <div class="form-group col-sm-4">
+                <label for="maxScore">Max Score</label>
+                <input type="number" class="form-control" id="maxScore" min="0" placeholder="Max Score" ng-model="maxScore">
+            </div>
+        </div>
+        <div class="row">
+            <div class="form-group col-sm-4">
+                <label for="shades">Number of Shades</label>
+                <input type="number" class="form-control" id="shades" min="1" placeholder="Number of Shades" ng-model="shades">
+            </div>
+        </div>
+    </form>
+    <h1>Colors</h1>
+    <form class="form-inline">
+        <div class="color-item" ng-repeat="color in colors">
+            <div class="input-group">
+                <input class="form-control" minicolors type="text" ng-model="color.hex">
+            </div>
+            <button class="btn btn-danger btn-sm" aria-label="Remove Color" ng-click="removeColor(color)">
+                <span class="glyphicon glyphicon-remove"></span>
+            </button>
+        </div>
+        <button class="btn btn-success btn-sm color-item" ng-click="addColor()">
+            <span class="glyphicon glyphicon-plus"></span> Add Color
+        </button>
+    </form>
+    <h1>Result</h1>
+    <div id="score-color">
+        <div id="score-color-map">
+            <canvas id="score-color-canvas"></canvas>
+            <div id="score-color-rule">
+                <div id="score-color-rule-text">50</div>
+            </div>
+        </div>
+        <div id="score-color-d3"></div>
+    </div>
+    <h1>[Script] Thresholds</h1>
+    <ui-codemirror ui-codemirror-opts="editorOptions" ng-model="thresholdsCode"></ui-codemirror>
+    <h1>[Script] Colors</h1>
+    <ui-codemirror ui-codemirror-opts="editorOptions" ng-model="colorsInterpolatedCode"></ui-codemirror>
+    <h1>[Script] bitscore_color</h1>
+    <ui-codemirror ui-codemirror-opts="editorOptions" ng-model="bitscoreColor"></ui-codemirror>
+    <h1>[Script] bitscore_color_min</h1>
+    <ui-codemirror ui-codemirror-opts="editorOptions" ng-model="bitscoreColorMin"></ui-codemirror>
+</div>
+
+<script src="http://underscorejs.org/underscore-min.js"></script>
 <script src="http://code.jquery.com/jquery-1.11.2.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
 <script src="http://rawgit.com/gka/chroma.js/master/chroma.min.js"></script>
-<script src="https://google-code-prettify.googlecode.com/svn/loader/run_prettify.js"></script>
+<script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.4.0-beta.6/angular.min.js"></script>
+<script src="http://rawgit.com/claviska/jquery-minicolors/master/jquery.minicolors.min.js"></script>
+<script src="http://rawgit.com/kaihenzler/angular-minicolors/master/angular-minicolors.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.1.0/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.1.0/mode/javascript/javascript.min.js"></script>
+<script src="http://rawgit.com/angular-ui/ui-codemirror/master/src/ui-codemirror.js"></script>
 <script>
+var app = angular.module('app', ['minicolors', 'ui.codemirror']);
+app.config(function (minicolorsProvider) {
+    angular.extend(minicolorsProvider.defaults, {
+        position: 'bottom left'
+    });
+});
+app.controller('AppCtrl', function ($scope) {
+    $scope.minScore = 40;
+    $scope.maxScore = 200;
+    $scope.shades = 5;
+    $scope.colors = [{hex: "#5e5e5e"}, {hex: "#53739c"}, {hex: "#508f62"}, {hex: "#845e93"}, {hex: "#bd4939"}];
+    
+    
+    function updateCode() {
+        $scope.colorsHex = _.map($scope.colors, function(x){ return x.hex; });
+        var color_interpolator = chroma.scale($scope.colorsHex).domain([$scope.minScore, $scope.maxScore], $scope.shades);
+        //$scope.colorsCode = JSON.stringify($scope.colorsHex);
+        $scope.thresholds = _.map(color_interpolator.domain().slice(0,-1), Math.ceil);
+        $scope.colorsInterpolated = _.map(_.map($scope.thresholds, color_interpolator), function(x){ return x.hex() });
+        $scope.thresholdsCode = JSON.stringify($scope.thresholds);
+        $scope.colorsInterpolatedCode = JSON.stringify($scope.colorsInterpolated);
+        // generate functions
+        var code = bitscore_color.toString();
+        code = code.replace('avg_color_list', $scope.colorsInterpolatedCode);
+        code = code.replace('threshold_list', $scope.thresholdsCode);
+        var toplevel = UglifyJS.parse(code);
+        toplevel.figure_out_scope();
+        var compressor = UglifyJS.Compressor();
+        var compressed_ast = toplevel.transform(compressor);
+        compressed_ast.figure_out_scope();
+        compressed_ast.compute_char_frequency();
+        compressed_ast.mangle_names();
+        var stream = UglifyJS.OutputStream();
+        compressed_ast.print(stream);
+        var code_min = stream.toString().replace(/"/g, "'");
+        $scope.bitscoreColor = code;
+        $scope.bitscoreColorMin = code_min;
+        
+        // Draw Results
+        draw_legend_continuous($scope.colorsInterpolated);
+    }
+    
+    $scope.$watchGroup(['minScore', 'maxScore', 'shades'], function() {
+        updateCode();
+    });
+    
+    $scope.$watch('colors', function() {
+        updateCode();
+    }, true);
+    
+    $scope.addColor = function() {
+        var color = $scope.colors.slice(-1)[0] || {hex: "#5e5e5e"};
+        $scope.colors.push({hex: color.hex});
+    };
+
+    $scope.removeColor = function(colorToRemove) {
+        var index = $scope.colors.indexOf(colorToRemove);
+        $scope.colors.splice(index, 1);
+    };
+    
+    $scope.editorOptions = {
+        lineWrapping : true,
+        lineNumbers: true,
+        readOnly: 'nocursor',
+        mode: 'javascript',
+    };
+    
+    // Draw Results
+    var legend_dim = { width: 300, height: 30, top: 0, right: 20, bottom: 0, left: 20 }
+    document.getElementById('score-color-canvas').width = legend_dim.width;
+    document.getElementById('score-color-canvas').height = legend_dim.height;
+    var legend_svg = d3.select('#score-color-d3').append('svg')
+        .attr('width', legend_dim.width)
+        .attr('height', legend_dim.height);
+
+    function draw_bilinear(canvas, legend_dim, top_color_list, bottom_color_list, offsetX) {
+        canvas.width = legend_dim.width;
+        canvas.height = legend_dim.height;
+        var ctx = canvas.getContext('2d');
+        // setup x color interpolators
+        var top_color_interpolator = chroma.scale(top_color_list).domain([legend_dim.left, legend_dim.width - legend_dim.right], $scope.shades);
+        var bottom_color_interpolator = chroma.scale(bottom_color_list).domain([legend_dim.left, legend_dim.width - legend_dim.right], $scope.shades);
+        if (offsetX) {
+            var g = ctx.createLinearGradient(0, 0, 0, legend_dim.height);
+            g.addColorStop(0, top_color_interpolator(offsetX).hex());
+            g.addColorStop(1, bottom_color_interpolator(offsetX).hex());
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        } else {
+            var imageData = ctx.getImageData(0, 0, legend_dim.width, legend_dim.height);
+            var pixels = imageData.data;
+            var inner_width = legend_dim.width - legend_dim.left - legend_dim.right;
+            var y_domain = [0, legend_dim.height];
+            var x_offset = legend_dim.width * 4;
+            for (var x = 0; x < legend_dim.width; x++) {
+                // setup y color interpolator
+                var y_color_list = [top_color_interpolator(x).hex(), bottom_color_interpolator(x).hex()]
+                var y_color_interpolator = chroma.scale(y_color_list).domain(y_domain);
+                for (var y = 0; y < legend_dim.height; y++) {
+                    var color = y_color_interpolator(y).rgb();
+                    pixels[y * x_offset + x * 4] = color[0];
+                    pixels[y * x_offset + x * 4 + 1] = color[1];
+                    pixels[y * x_offset + x * 4 + 2] = color[2];
+                    pixels[y * x_offset + x * 4 + 3] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+    }
+
+    function draw_legend_continuous(color_list) {
+        // draw background
+        var canvas = $('#score-color-canvas')[0];
+        draw_bilinear(canvas, legend_dim, $scope.colorsInterpolated, $scope.colorsInterpolated);
+        // draw axis
+        var range_max = legend_svg.attr('width') - legend_dim.left - legend_dim.right;
+        var x = d3.scale.linear().range([0, range_max]).domain([$scope.minScore, $scope.maxScore]);
+        var xAxis = d3.svg.axis().scale(x).orient('bottom').tickValues(d3.range($scope.minScore, $scope.maxScore + 1, ($scope.maxScore - $scope.minScore) / (color_list.length)));
+        legend_svg.select("g").remove();
+        legend_svg.append("g").attr("class", "x axis")
+            .attr("transform", "translate(" + legend_dim.left + "," + legend_dim.top + ")")
+            .call(xAxis);
+    }
+
+    // mouse over events
+    $('#score-color-canvas').mousemove(function (e) {
+        $('#score-color-rule').css('left', e.offsetX);
+        var x = d3.scale.linear().range([$scope.minScore, $scope.maxScore]).domain([legend_dim.left, legend_dim.width - legend_dim.left]);
+        $('#score-color-rule-text').text(Math.round(x(e.offsetX)));
+        // draw background
+        var canvas = $('#score-color-canvas')[0];
+        draw_bilinear(canvas, legend_dim, $scope.colorsInterpolated, $scope.colorsInterpolated, Math.round(e.offsetX));
+    });
+    $('#score-color-rule').hide();
+    $('#score-color-map').mouseleave(function (e) {
+        $('#score-color-rule').hide();
+        // draw background
+        var canvas = $('#score-color-canvas')[0];
+        draw_bilinear(canvas, legend_dim, $scope.colorsInterpolated, $scope.colorsInterpolated);
+    });
+    $('#score-color-map').mouseenter(function (e) {
+        $('#score-color-rule').show();
+        console.log(e.offsetX);
+    });
+});
+function bitscore_color(f) {
+    var bitscore = f.get('bitscore');
+    var colors = avg_color_list;
+    var thresholds = threshold_list;
+    for (var i = 0; i < colors.length - 1 && bitscore >= thresholds[i]; i++) {}
+    return colors[i];
+}
+/*
 var light_color_list = ['#fc9272', '#bcbddc', '#a1d99b', '#9ecae1', '#bdbdbd'].reverse();
 var dark_color_list = ['#7f0000', '#4d004b', '#004529', '#081d58', '#000000'].reverse();
-var avg_color_list = [];
+var avg_color_list = []; // ["#5e5e5e","#53739c","#508f62","#845e93","#bd4939"]
 var y_domain = [0, 1];
 // static
 var min_score = 40;
@@ -23,55 +294,8 @@ for (var i = 0; i < light_color_list.length; i++) {
     avg_color_list[i] = y_color_interpolator(0.5).hex();
     threshold_list[i] = min_score + (max_score - min_score) / light_color_list.length * (i + 1);
 }
-function bitscore_color(f) {
-    var bitscore = f.get('bitscore');
-    var colors = avg_color_list;
-    var thresholds = threshold_list;
-    for (var i = 0; i < colors.length - 1 && bitscore >= thresholds[i]; i++) {}
-    return colors[i];
-}
-$(function () { // document ready
-    $('#avg_color_list').text(JSON.stringify(avg_color_list));
-    $('#threshold_list').text(JSON.stringify(threshold_list));
-    var code = bitscore_color.toString();
-    code = code.replace('avg_color_list', JSON.stringify(avg_color_list));
-    code = code.replace('threshold_list', JSON.stringify(threshold_list));
-    $('#bitscore_color').text(code);
-    var toplevel = UglifyJS.parse(code);
-    toplevel.figure_out_scope();
-    var compressor = UglifyJS.Compressor();
-    var compressed_ast = toplevel.transform(compressor);
-    compressed_ast.figure_out_scope();
-    compressed_ast.compute_char_frequency();
-    compressed_ast.mangle_names();
-    var stream = UglifyJS.OutputStream();
-    compressed_ast.print(stream);
-    var code_min = stream.toString().replace(/"/g, "'");
-    $('#bitscore_color_min').text(code_min);
-});
-// #fc9272, #bcbddc, #a1d99b, #9ecae1, #bdbdbd
-var light_color_interpolator = chroma.scale(light_color_list).domain([min_score, max_score], 5);
-// #7f0000, #4d004b, #004529, #081d58, #000000
-var dark_color_interpolator = chroma.scale(dark_color_list).domain([min_score, max_score], 5);
-// build color lookup tables
-var score_to_color_light = {};
-var score_to_color_dark = {};
-for (var i = min_score; i <= max_score; i++) {
-    score_to_color_light[i] = light_color_interpolator(i).hex();
-    score_to_color_dark[i] = dark_color_interpolator(i).hex();
-}
+*/
 </script>
-</head>
-
-<body>
-<h1>avg_color_list</h1>
-<pre id="avg_color_list" class="prettyprint"></pre>
-<h1>threshold_list</h1>
-<pre id="threshold_list" class="prettyprint"></pre>
-<h1>bitscore_color</h1>
-<pre id="bitscore_color" class="prettyprint"></pre>
-<h1>bitscore_color_min</h1>
-<pre id="bitscore_color_min" class="prettyprint"></pre>
 <script>
 // UglifyJS
 !function(n,e){"use strict";function t(n){for(var e=Object.create(null),t=0;t<n.length;++t)e[n[t]]=!0;return e}function r(n,e){return Array.prototype.slice.call(n,e||0)}function o(n){return n.split("")}function i(n,e){for(var t=e.length;--t>=0;)if(e[t]==n)return!0;return!1}function a(n,e){for(var t=0,r=e.length;r>t;++t)if(n(e[t]))return e[t]}function u(n,e){if(0>=e)return"";if(1==e)return n;var t=u(n,e>>1);return t+=t,1&e&&(t+=n),t}function s(n,e){Error.call(this,n),this.msg=n,this.defs=e}function c(n,e,t){n===!0&&(n={});var r=n||{};if(t)for(var o in r)r.hasOwnProperty(o)&&!e.hasOwnProperty(o)&&s.croak("`"+o+"` is not a supported option",e);for(var o in e)e.hasOwnProperty(o)&&(r[o]=n&&n.hasOwnProperty(o)?n[o]:e[o]);return r}function f(n,e){for(var t in e)e.hasOwnProperty(t)&&(n[t]=e[t]);return n}function l(){}function p(n,e){n.indexOf(e)<0&&n.push(e)}function d(n,e){return n.replace(/\{(.+?)\}/g,function(n,t){return e[t]})}function h(n,e){for(var t=n.length;--t>=0;)n[t]===e&&n.splice(t,1)}function _(n,e){function t(n,t){for(var r=[],o=0,i=0,a=0;o<n.length&&i<t.length;)r[a++]=e(n[o],t[i])<=0?n[o++]:t[i++];return o<n.length&&r.push.apply(r,n.slice(o)),i<t.length&&r.push.apply(r,t.slice(i)),r}function r(n){if(n.length<=1)return n;var e=Math.floor(n.length/2),o=n.slice(0,e),i=n.slice(e);return o=r(o),i=r(i),t(o,i)}return n.length<2?n.slice():r(n)}function m(n,e){return n.filter(function(n){return e.indexOf(n)<0})}function v(n,e){return n.filter(function(n){return e.indexOf(n)>=0})}function g(n){function e(n){if(1==n.length)return t+="return str === "+JSON.stringify(n[0])+";";t+="switch(str){";for(var e=0;e<n.length;++e)t+="case "+JSON.stringify(n[e])+":";t+="return true}return false;"}n instanceof Array||(n=n.split(" "));var t="",r=[];n:for(var o=0;o<n.length;++o){for(var i=0;i<r.length;++i)if(r[i][0].length==n[o].length){r[i].push(n[o]);continue n}r.push([n[o]])}if(r.length>3){r.sort(function(n,e){return e.length-n.length}),t+="switch(str.length){";for(var o=0;o<r.length;++o){var a=r[o];t+="case "+a[0].length+":",e(a)}t+="}"}else e(n);return new Function("str",t)}function b(n,e){for(var t=n.length;--t>=0;)if(!e(n[t]))return!1;return!0}function y(){this._values=Object.create(null),this._size=0}function A(n,e,t,r){arguments.length<4&&(r=Y),e=e?e.split(/\s+/):[];var o=e;r&&r.PROPS&&(e=e.concat(r.PROPS));for(var i="return function AST_"+n+"(props){ if (props) { ",a=e.length;--a>=0;)i+="this."+e[a]+" = props."+e[a]+";";var u=r&&new r;(u&&u.initialize||t&&t.initialize)&&(i+="this.initialize();"),i+="}}";var s=new Function(i)();if(u&&(s.prototype=u,s.BASE=r),r&&r.SUBCLASSES.push(s),s.prototype.CTOR=s,s.PROPS=e||null,s.SELF_PROPS=o,s.SUBCLASSES=[],n&&(s.prototype.TYPE=s.TYPE=n),t)for(a in t)t.hasOwnProperty(a)&&(/^\$/.test(a)?s[a.substr(1)]=t[a]:s.prototype[a]=t[a]);return s.DEFMETHOD=function(n,e){this.prototype[n]=e},s}function w(n,e){n.body instanceof X?n.body._walk(e):n.body.forEach(function(n){n._walk(e)})}function E(n){this.visit=n,this.stack=[]}function D(n){return n>=97&&122>=n||n>=65&&90>=n||n>=170&&Re.letter.test(String.fromCharCode(n))}function F(n){return n>=48&&57>=n}function C(n){return F(n)||D(n)}function S(n){return Re.digit.test(String.fromCharCode(n))}function B(n){return Re.non_spacing_mark.test(n)||Re.space_combining_mark.test(n)}function k(n){return Re.connector_punctuation.test(n)}function x(n){return!Be(n)&&/^[a-z_$][a-z0-9_$]*$/i.test(n)}function T(n){return 36==n||95==n||D(n)}function $(n){var e=n.charCodeAt(0);return T(e)||F(e)||8204==e||8205==e||B(n)||k(n)||S(e)}function O(n){return/^[a-z_$][a-z0-9_$]*$/i.test(n)}function M(n){return Te.test(n)?parseInt(n.substr(2),16):$e.test(n)?parseInt(n.substr(1),8):Oe.test(n)?parseFloat(n):void 0}function q(n,e,t,r,o){this.message=n,this.filename=e,this.line=t,this.col=r,this.pos=o,this.stack=(new Error).stack}function z(n,e,t,r,o){throw new q(n,e,t,r,o)}function N(n,e,t){return n.type==e&&(null==t||n.value==t)}function H(n,e,t){function r(){return D.text.charAt(D.pos)}function o(n,e){var t=D.text.charAt(D.pos++);if(n&&!t)throw Pe;return"\r\n\u2028\u2029".indexOf(t)>=0?(D.newline_before=D.newline_before||!e,++D.line,D.col=0,e||"\r"!=t||"\n"!=r()||(++D.pos,t="\n")):++D.col,t}function i(n){for(;n-->0;)o()}function a(n){return D.text.substr(D.pos,n.length)==n}function u(n,e){var t=D.text.indexOf(n,D.pos);if(e&&-1==t)throw Pe;return t}function s(){D.tokline=D.line,D.tokcol=D.col,D.tokpos=D.pos}function c(n,t,r){D.regex_allowed="operator"==n&&!Ie(t)||"keyword"==n&&ke(t)||"punc"==n&&ze(t),S="punc"==n&&"."==t;var o={type:n,value:t,line:D.tokline,col:D.tokcol,pos:D.tokpos,endline:D.line,endcol:D.col,endpos:D.pos,nlb:D.newline_before,file:e};if(!r){o.comments_before=D.comments_before,D.comments_before=[];for(var i=0,a=o.comments_before.length;a>i;i++)o.nlb=o.nlb||o.comments_before[i].nlb}return D.newline_before=!1,new W(o)}function f(){for(;qe(r());)o()}function l(n){for(var e,t="",i=0;(e=r())&&n(e,i++);)t+=o();return t}function p(n){z(n,e,D.tokline,D.tokcol,D.tokpos)}function d(n){var e=!1,t=!1,r=!1,o="."==n,i=l(function(i,a){var u=i.charCodeAt(0);switch(u){case 120:case 88:return r?!1:r=!0;case 101:case 69:return r?!0:e?!1:e=t=!0;case 45:return t||0==a&&!n;case 43:return t;case t=!1,46:return o||r||e?!1:o=!0}return C(u)});n&&(i=n+i);var a=M(i);return isNaN(a)?void p("Invalid syntax: "+i):c("num",a)}function h(n){var e=o(!0,n);switch(e.charCodeAt(0)){case 110:return"\n";case 114:return"\r";case 116:return"	";case 98:return"\b";case 118:return"";case 102:return"\f";case 48:return"\x00";case 120:return String.fromCharCode(_(2));case 117:return String.fromCharCode(_(4));case 10:return"";default:return e}}function _(n){for(var e=0;n>0;--n){var t=parseInt(o(!0),16);isNaN(t)&&p("Invalid hex-character pattern in string"),e=e<<4|t}return e}function m(n){var e,t=D.regex_allowed,r=u("\n");return-1==r?(e=D.text.substr(D.pos),D.pos=D.text.length):(e=D.text.substring(D.pos,r),D.pos=r),D.col=D.tokcol+(D.pos-D.tokpos),D.comments_before.push(c(n,e,!0)),D.regex_allowed=t,E()}function v(){for(var n,e,t=!1,i="",a=!1;null!=(n=r());)if(t)"u"!=n&&p("Expecting UnicodeEscapeSequence -- uXXXX"),n=h(),$(n)||p("Unicode char: "+n.charCodeAt(0)+" is not valid in identifier"),i+=n,t=!1;else if("\\"==n)a=t=!0,o();else{if(!$(n))break;i+=o()}return Ce(i)&&a&&(e=i.charCodeAt(0).toString(16).toUpperCase(),i="\\u"+"0000".substr(e.length)+e+i.slice(1)),i}function g(n){function e(n){if(!r())return n;var t=n+r();return Me(t)?(o(),e(t)):n}return c("operator",e(n||o()))}function b(){switch(o(),r()){case"/":return o(),m("comment1");case"*":return o(),k()}return D.regex_allowed?x(""):g("/")}function y(){return o(),F(r().charCodeAt(0))?d("."):c("punc",".")}function A(){var n=v();return S?c("name",n):Se(n)?c("atom",n):Ce(n)?Me(n)?c("operator",n):c("keyword",n):c("name",n)}function w(n,e){return function(t){try{return e(t)}catch(r){if(r!==Pe)throw r;p(n)}}}function E(n){if(null!=n)return x(n);if(f(),s(),t){if(a("<!--"))return i(4),m("comment3");if(a("-->")&&D.newline_before)return i(3),m("comment4")}var e=r();if(!e)return c("eof");var u=e.charCodeAt(0);switch(u){case 34:case 39:return B(e);case 46:return y();case 47:return b()}return F(u)?d():Ne(e)?c("punc",o()):xe(e)?g():92==u||T(u)?A():void p("Unexpected character '"+e+"'")}var D={text:n.replace(/\uFEFF/g,""),filename:e,pos:0,tokpos:0,line:1,tokline:0,col:0,tokcol:0,newline_before:!1,regex_allowed:!1,comments_before:[]},S=!1,B=w("Unterminated string constant",function(n){for(var e=o(),t="";;){var r=o(!0);if("\\"==r){var i=0,a=null;r=l(function(n){if(n>="0"&&"7">=n){if(!a)return a=n,++i;if("3">=a&&2>=i)return++i;if(a>="4"&&1>=i)return++i}return!1}),r=i>0?String.fromCharCode(parseInt(r,8)):h(!0)}else if(r==e)break;t+=r}var u=c("string",t);return u.quote=n,u}),k=w("Unterminated multiline comment",function(){var n=D.regex_allowed,e=u("*/",!0),t=D.text.substring(D.pos,e),r=t.split("\n"),o=r.length;D.pos=e+2,D.line+=o-1,o>1?D.col=r[o-1].length:D.col+=r[o-1].length,D.col+=2;var i=D.newline_before=D.newline_before||t.indexOf("\n")>=0;return D.comments_before.push(c("comment2",t,!0)),D.regex_allowed=n,D.newline_before=i,E()}),x=w("Unterminated regular expression",function(n){for(var e,t=!1,r=!1;e=o(!0);)if(t)n+="\\"+e,t=!1;else if("["==e)r=!0,n+=e;else if("]"==e&&r)r=!1,n+=e;else{if("/"==e&&!r)break;"\\"==e?t=!0:n+=e}var i=v();return c("regexp",new RegExp(n,i))});return E.context=function(n){return n&&(D=n),D},E}function R(n,e){function t(n,e){return N(I.token,n,e)}function r(){return I.peeked||(I.peeked=I.input())}function o(){return I.prev=I.token,I.peeked?(I.token=I.peeked,I.peeked=null):I.token=I.input(),I.in_directives=I.in_directives&&("string"==I.token.type||t("punc",";")),I.token}function i(){return I.prev}function u(n,e,t,r){var o=I.input.context();z(n,o.filename,null!=e?e:o.tokline,null!=t?t:o.tokcol,null!=r?r:o.tokpos)}function s(n,e){u(e,n.line,n.col)}function f(n){null==n&&(n=I.token),s(n,"Unexpected token: "+n.type+" ("+n.value+")")}function l(n,e){return t(n,e)?o():void s(I.token,"Unexpected token "+I.token.type+" ?"+I.token.value+"?, expected "+n+" ?"+e+"?")}function p(n){return l("punc",n)}function d(){return!e.strict&&(I.token.nlb||t("eof")||t("punc","}"))}function h(){t("punc",";")?o():d()||f()}function _(){p("(");var n=An(!0);return p(")"),n}function m(n){return function(){var e=I.token,t=n(),r=i();return t.start=e,t.end=r,t}}function v(){(t("operator","/")||t("operator","/="))&&(I.peeked=null,I.token=I.input(I.token.value.substr(1)))}function g(){var n=M(ce);a(function(e){return e.name==n.name},I.labels)&&u("Label "+n.name+" defined twice"),p(":"),I.labels.push(n);var e=U();return I.labels.pop(),e instanceof rn||n.references.forEach(function(e){e instanceof En&&(e=e.label.start,u("Continue label `"+n.name+"` refers to non-IterationStatement.",e.line,e.col,e.pos))}),new tn({body:e,label:n})}function b(n){return new K({body:(n=An(!0),h(),n)})}function y(n){var e,t=null;d()||(t=M(le,!0)),null!=t?(e=a(function(n){return n.name==t.name},I.labels),e||u("Undefined label "+t.name),t.thedef=e):0==I.in_loop&&u(n.TYPE+" not inside a loop or switch"),h();var r=new n({label:t});return e&&e.references.push(r),r}function A(){p("(");var n=null;return!t("punc",";")&&(n=t("keyword","var")?(o(),V(!0)):An(!0,!0),t("operator","in"))?(n instanceof On&&n.definitions.length>1&&u("Only one variable declaration allowed in for..in loop"),o(),E(n)):w(n)}function w(n){p(";");var e=t("punc",";")?null:An(!0);p(";");var r=t("punc",")")?null:An(!0);return p(")"),new sn({init:n,condition:e,step:r,body:j(U)})}function E(n){var e=n instanceof On?n.definitions[0].name:null,t=An(!0);return p(")"),new cn({init:n,name:e,object:t,body:j(U)})}function D(){var n=_(),e=U(),r=null;return t("keyword","else")&&(o(),r=U()),new Dn({condition:n,body:e,alternative:r})}function F(){p("{");for(var n=[];!t("punc","}");)t("eof")&&f(),n.push(U());return o(),n}function C(){p("{");for(var n,e=[],r=null,a=null;!t("punc","}");)t("eof")&&f(),t("keyword","case")?(a&&(a.end=i()),r=[],a=new Bn({start:(n=I.token,o(),n),expression:An(!0),body:r}),e.push(a),p(":")):t("keyword","default")?(a&&(a.end=i()),r=[],a=new Sn({start:(n=I.token,o(),p(":"),n),body:r}),e.push(a)):(r||f(),r.push(U()));return a&&(a.end=i()),o(),e}function S(){var n=F(),e=null,r=null;if(t("keyword","catch")){var a=I.token;o(),p("(");var s=M(se);p(")"),e=new xn({start:a,argname:s,body:F(),end:i()})}if(t("keyword","finally")){var a=I.token;o(),r=new Tn({start:a,body:F(),end:i()})}return e||r||u("Missing catch/finally blocks"),new kn({body:n,bcatch:e,bfinally:r})}function B(n,e){for(var r=[];r.push(new qn({start:I.token,name:M(e?oe:re),value:t("operator","=")?(o(),An(!1,n)):null,end:i()})),t("punc",",");)o();return r}function k(){var n,e=I.token;switch(e.type){case"name":case"keyword":n=O(fe);break;case"num":n=new _e({start:e,end:e,value:e.value});break;case"string":n=new he({start:e,end:e,value:e.value,quote:e.quote});break;case"regexp":n=new me({start:e,end:e,value:e.value});break;case"atom":switch(e.value){case"false":n=new De({start:e,end:e});break;case"true":n=new Fe({start:e,end:e});break;case"null":n=new ge({start:e,end:e})}}return o(),n}function x(n,e,r){for(var i=!0,a=[];!t("punc",n)&&(i?i=!1:p(","),!e||!t("punc",n));)a.push(t("punc",",")&&r?new Ae({start:I.token,end:I.token}):An(!1));return o(),a}function T(){var n=I.token;switch(o(),n.type){case"num":case"string":case"name":case"operator":case"keyword":case"atom":return n.value;default:f()}}function $(){var n=I.token;switch(o(),n.type){case"name":case"operator":case"keyword":case"atom":return n.value;default:f()}}function O(n){var e=I.token.value;return new("this"==e?pe:n)({name:String(e),start:I.token,end:I.token})}function M(n,e){if(!t("name"))return e||u("Name expected"),null;var r=O(n);return o(),r}function q(n,e,t){return"++"!=e&&"--"!=e||P(t)||u("Invalid use of "+e+" operator"),new n({operator:e,expression:t})}function R(n){return dn(ln(!0),0,n)}function P(n){return e.strict?n instanceof pe?!1:n instanceof Rn||n instanceof ne:!0}function j(n){++I.in_loop;var e=n();return--I.in_loop,e}e=c(e,{strict:!1,filename:null,toplevel:null,expression:!1,html5_comments:!0,bare_returns:!1});var I={input:"string"==typeof n?H(n,e.filename,e.html5_comments):n,token:null,prev:null,peeked:null,in_function:0,in_directives:!0,in_loop:0,labels:[]};I.token=o();var U=m(function(){var n;switch(v(),I.token.type){case"string":var a=I.in_directives,s=b();return a&&s.body instanceof he&&!t("punc",",")?new J({start:s.body.start,end:s.body.end,quote:s.body.quote,value:s.body.value}):s;case"num":case"regexp":case"operator":case"atom":return b();case"name":return N(r(),"punc",":")?g():b();case"punc":switch(I.token.value){case"{":return new Q({start:I.token,body:F(),end:i()});case"[":case"(":return b();case";":return o(),new nn;default:f()}case"keyword":switch(n=I.token.value,o(),n){case"break":return y(wn);case"continue":return y(En);case"debugger":return h(),new G;case"do":return new an({body:j(U),condition:(l("keyword","while"),n=_(),h(),n)});case"while":return new un({condition:_(),body:j(U)});case"for":return A();case"function":return L(mn);case"if":return D();case"return":return 0!=I.in_function||e.bare_returns||u("'return' outside of function"),new bn({value:t("punc",";")?(o(),null):d()?null:(n=An(!0),h(),n)});case"switch":return new Fn({expression:_(),body:j(C)});case"throw":return I.token.nlb&&u("Illegal newline after 'throw'"),new yn({value:(n=An(!0),h(),n)});case"try":return S();case"var":return n=V(),h(),n;case"const":return n=W(),h(),n;case"with":return new fn({expression:_(),body:U()});default:f()}}}),L=function(n){var e=n===mn,r=t("name")?M(e?ae:ue):null;return e&&!r&&f(),p("("),new n({name:r,argnames:function(n,e){for(;!t("punc",")");)n?n=!1:p(","),e.push(M(ie));return o(),e}(!0,[]),body:function(n,e){++I.in_function,I.in_directives=!0,I.in_loop=0,I.labels=[];var t=F();return--I.in_function,I.in_loop=n,I.labels=e,t}(I.in_loop,I.labels)})},V=function(n){return new On({start:i(),definitions:B(n,!1),end:i()})},W=function(){return new Mn({start:i(),definitions:B(!1,!0),end:i()})},Y=function(){var n=I.token;l("operator","new");var e,r=X(!1);return t("punc","(")?(o(),e=x(")")):e=[],on(new Nn({start:n,expression:r,args:e,end:i()}),!0)},X=function(n){if(t("operator","new"))return Y();var e=I.token;if(t("punc")){switch(e.value){case"(":o();var r=An(!0);return r.start=e,r.end=I.token,p(")"),on(r,n);case"[":return on(Z(),n);case"{":return on(en(),n)}f()}if(t("keyword","function")){o();var a=L(_n);return a.start=e,a.end=i(),on(a,n)}return We[I.token.type]?on(k(),n):void f()},Z=m(function(){return p("["),new Xn({elements:x("]",!e.strict,!0)})}),en=m(function(){p("{");for(var n=!0,r=[];!t("punc","}")&&(n?n=!1:p(","),e.strict||!t("punc","}"));){var a=I.token,u=a.type,s=T();if("name"==u&&!t("punc",":")){if("get"==s){r.push(new Qn({start:a,key:k(),value:L(hn),end:i()}));continue}if("set"==s){r.push(new Zn({start:a,key:k(),value:L(hn),end:i()}));continue}}p(":"),r.push(new Kn({start:a,quote:a.quote,key:s,value:An(!1),end:i()}))}return o(),new Gn({properties:r})}),on=function(n,e){var r=n.start;if(t("punc","."))return o(),on(new Pn({start:r,expression:n,property:$(),end:i()}),e);if(t("punc","[")){o();var a=An(!0);return p("]"),on(new jn({start:r,expression:n,property:a,end:i()}),e)}return e&&t("punc","(")?(o(),on(new zn({start:r,expression:n,args:x(")"),end:i()}),!0)):n},ln=function(n){var e=I.token;if(t("operator")&&je(e.value)){o(),v();var r=q(Un,e.value,ln(n));return r.start=e,r.end=i(),r}for(var a=X(n);t("operator")&&Ie(I.token.value)&&!I.token.nlb;)a=q(Ln,I.token.value,a),a.start=e,a.end=I.token,o();return a},dn=function(n,e,r){var i=t("operator")?I.token.value:null;"in"==i&&r&&(i=null);var a=null!=i?Le[i]:null;if(null!=a&&a>e){o();var u=dn(ln(!0),a,r);return dn(new Vn({start:n.start,left:n,operator:i,right:u,end:u.end}),e,r)}return n},vn=function(n){var e=I.token,r=R(n);if(t("operator","?")){o();var a=An(!1);return p(":"),new Wn({start:e,condition:r,consequent:a,alternative:An(!1,n),end:i()})}return r},gn=function(n){var e=I.token,r=vn(n),a=I.token.value;if(t("operator")&&Ue(a)){if(P(r))return o(),new Yn({start:e,left:r,operator:a,right:gn(n),end:i()});u("Invalid assignment")}return r},An=function(n,e){var i=I.token,a=gn(e);return n&&t("punc",",")?(o(),new Hn({start:i,car:a,cdr:An(!0,e),end:r()})):a};return e.expression?An(!0):function(){for(var n=I.token,r=[];!t("eof");)r.push(U());var o=i(),a=e.toplevel;return a?(a.body=a.body.concat(r),a.end=o):a=new pn({start:n,body:r,end:o}),a}()}function P(n,e){E.call(this),this.before=n,this.after=e}function j(n,e,t){this.name=t.name,this.orig=[t],this.scope=n,this.references=[],this.global=!1,this.mangled_name=null,this.undeclared=!1,this.constant=!1,this.index=e}function I(n){function e(n,e){return n.replace(/[\u0080-\uffff]/g,function(n){var t=n.charCodeAt(0).toString(16);if(t.length<=2&&!e){for(;t.length<2;)t="0"+t;return"\\x"+t}for(;t.length<4;)t="0"+t;return"\\u"+t})}function t(t,r){function o(){return"'"+t.replace(/\x27/g,"\\'")+"'"}function i(){return'"'+t.replace(/\x22/g,'\\"')+'"'}var a=0,u=0;switch(t=t.replace(/[\\\b\f\n\r\t\x22\x27\u2028\u2029\0\ufeff]/g,function(n){switch(n){case"\\":return"\\\\";case"\b":return"\\b";case"\f":return"\\f";case"\n":return"\\n";case"\r":return"\\r";case"\u2028":return"\\u2028";case"\u2029":return"\\u2029";case'"':return++a,'"';case"'":return++u,"'";case"\x00":return"\\x00";case"\ufeff":return"\\ufeff"}return n}),n.ascii_only&&(t=e(t)),n.quote_style){case 1:return o();case 2:return i();case 3:return"'"==r?o():i();default:return a>u?o():i()}}function r(e,r){var o=t(e,r);return n.inline_script&&(o=o.replace(/<\x2fscript([>\/\t\n\f\r ])/gi,"<\\/script$1")),o}function o(t){return t=t.toString(),n.ascii_only&&(t=e(t,!0)),t}function i(e){return u(" ",n.indent_start+A-e*n.indent_level)}function a(){return B.charAt(B.length-1)}function s(){n.max_line_len&&w>n.max_line_len&&f("\n")}function f(e){e=String(e);var t=e.charAt(0);if(S&&(t&&!(";}".indexOf(t)<0)||/[;]$/.test(B)||(n.semicolons||k(t)?(F+=";",w++,D++):(F+="\n",D++,E++,w=0),n.beautify||(C=!1)),S=!1,s()),!n.beautify&&n.preserve_line&&N[N.length-1])for(var r=N[N.length-1].start.line;r>E;)F+="\n",D++,E++,w=0,C=!1;if(C){var o=a();($(o)&&($(t)||"\\"==t)||/^[\+\-\/]$/.test(t)&&t==o)&&(F+=" ",w++,D++),C=!1}var i=e.split(/\r?\n/),u=i.length-1;E+=u,0==u?w+=i[u].length:w=i[u].length,D+=e.length,B=e,F+=e}function p(){S=!1,f(";")}function d(){return A+n.indent_level}function h(n){var e;return f("{"),M(),O(d(),function(){e=n()}),T(),f("}"),e}function _(n){f("(");var e=n();return f(")"),e}function m(n){f("[");var e=n();return f("]"),e}function v(){f(","),x()}function b(){f(":"),n.space_colon&&x()}function y(){return F}n=c(n,{indent_start:0,indent_level:4,quote_keys:!1,space_colon:!0,ascii_only:!1,unescape_regexps:!1,inline_script:!1,width:80,max_line_len:32e3,beautify:!1,source_map:null,bracketize:!1,semicolons:!0,comments:!1,preserve_line:!1,screw_ie8:!1,preamble:null,quote_style:0},!0);var A=0,w=0,E=1,D=0,F="",C=!1,S=!1,B=null,k=g("( [ + * / - , ."),x=n.beautify?function(){f(" ")}:function(){C=!0},T=n.beautify?function(e){n.beautify&&f(i(e?.5:0))}:l,O=n.beautify?function(n,e){n===!0&&(n=d());var t=A;A=n;var r=e();return A=t,r}:function(n,e){return e()},M=n.beautify?function(){f("\n")}:s,q=n.beautify?function(){f(";")}:function(){S=!0},z=n.source_map?function(e,t){try{e&&n.source_map.add(e.file||"?",E,w,e.line,e.col,t||"name"!=e.type?t:e.value)}catch(r){Y.warn("Couldn't figure out mapping for {file}:{line},{col} ¡÷ {cline},{ccol} [{name}]",{file:e.file,line:e.line,col:e.col,cline:E,ccol:w,name:t||""})}}:l;n.preamble&&f(n.preamble.replace(/\r\n?|[\n\u2028\u2029]|\s*$/g,"\n"));var N=[];return{get:y,toString:y,indent:T,indentation:function(){return A},current_width:function(){return w-A},should_break:function(){return n.width&&this.current_width()>=n.width},newline:M,print:f,space:x,comma:v,colon:b,last:function(){return B},semicolon:q,force_semicolon:p,to_ascii:e,print_name:function(n){f(o(n))},print_string:function(n,e){f(r(n,e))},next_indent:d,with_indent:O,with_block:h,with_parens:_,with_square:m,add_mapping:z,option:function(e){return n[e]},line:function(){return E},col:function(){return w},pos:function(){return D},push_node:function(n){N.push(n)},pop_node:function(){return N.pop()},stack:function(){return N},parent:function(n){return N[N.length-2-(n||0)]}}}function U(n,e){return this instanceof U?(P.call(this,this.before,this.after),void(this.options=c(n,{sequences:!e,properties:!e,dead_code:!e,drop_debugger:!e,unsafe:!1,unsafe_comps:!1,conditionals:!e,comparisons:!e,evaluate:!e,booleans:!e,loops:!e,unused:!e,hoist_funs:!e,keep_fargs:!1,keep_fnames:!1,hoist_vars:!1,if_return:!e,join_vars:!e,cascade:!e,side_effects:!e,pure_getters:!1,pure_funcs:null,negate_iife:!e,screw_ie8:!1,drop_console:!1,angular:!1,warnings:!0,global_defs:{}},!0))):new U(n,e)}function L(n){function e(e,o,i,a,u,s){if(r){var c=r.originalPositionFor({line:a,column:u});if(null===c.source)return;e=c.source,a=c.line,u=c.column,s=c.name||s}t.addMapping({generated:{line:o+n.dest_line_diff,column:i},original:{line:a+n.orig_line_diff,column:u},source:e,name:s})}n=c(n,{file:null,root:null,orig:null,orig_line_diff:0,dest_line_diff:0});var t,r=n.orig&&new MOZ_SourceMap.SourceMapConsumer(n.orig);return t=r?MOZ_SourceMap.SourceMapGenerator.fromSourceMap(r):new MOZ_SourceMap.SourceMapGenerator({file:n.file,sourceRoot:n.root}),{add:e,get:function(){return t},toString:function(){return JSON.stringify(t.toJSON())}}}e.UglifyJS=n,s.prototype=Object.create(Error.prototype),s.prototype.constructor=s,s.croak=function(n,e){throw new s(n,e)};var V=function(){function n(n,i,a){function u(){var u=i(n[s],s),l=u instanceof r;return l&&(u=u.v),u instanceof e?(u=u.v,u instanceof t?f.push.apply(f,a?u.v.slice().reverse():u.v):f.push(u)):u!==o&&(u instanceof t?c.push.apply(c,a?u.v.slice().reverse():u.v):c.push(u)),l}var s,c=[],f=[];if(n instanceof Array)if(a){for(s=n.length;--s>=0&&!u(););c.reverse(),f.reverse()}else for(s=0;s<n.length&&!u();++s);else for(s in n)if(n.hasOwnProperty(s)&&u())break;return f.concat(c)}function e(n){this.v=n}function t(n){this.v=n}function r(n){this.v=n}n.at_top=function(n){return new e(n)},n.splice=function(n){return new t(n)},n.last=function(n){return new r(n)};var o=n.skip={};return n}();y.prototype={set:function(n,e){return this.has(n)||++this._size,this._values["$"+n]=e,this},add:function(n,e){return this.has(n)?this.get(n).push(e):this.set(n,[e]),this},get:function(n){return this._values["$"+n]},del:function(n){return this.has(n)&&(--this._size,delete this._values["$"+n]),this},has:function(n){return"$"+n in this._values},each:function(n){for(var e in this._values)n(this._values[e],e.substr(1))},size:function(){return this._size},map:function(n){var e=[];for(var t in this._values)e.push(n(this._values[t],t.substr(1)));return e}};var W=A("Token","type value line col pos endline endcol endpos nlb comments_before file",{},null),Y=A("Node","start end",{clone:function(){return new this.CTOR(this)},$documentation:"Base class of all AST nodes",$propdoc:{start:"[AST_Token] The first token of this node",end:"[AST_Token] The last token of this node"},_walk:function(n){return n._visit(this)},walk:function(n){return this._walk(n)}},null);Y.warn_function=null,Y.warn=function(n,e){Y.warn_function&&Y.warn_function(d(n,e))};var X=A("Statement",null,{$documentation:"Base class of all statements"}),G=A("Debugger",null,{$documentation:"Represents a debugger statement"},X),J=A("Directive","value scope quote",{$documentation:'Represents a directive, like "use strict";',$propdoc:{value:"[string] The value of this directive as a plain string (it's not an AST_String!)",scope:"[AST_Scope/S] The scope that this directive affects",quote:"[string] the original quote character"}},X),K=A("SimpleStatement","body",{$documentation:"A statement consisting of an expression, i.e. a = 1 + 2",$propdoc:{body:"[AST_Node] an expression node (should not be instanceof AST_Statement)"},_walk:function(n){return n._visit(this,function(){this.body._walk(n)})}},X),Z=A("Block","body",{$documentation:"A body of statements (usually bracketed)",$propdoc:{body:"[AST_Statement*] an array of statements"},_walk:function(n){return n._visit(this,function(){w(this,n)})}},X),Q=A("BlockStatement",null,{$documentation:"A block statement"},Z),nn=A("EmptyStatement",null,{$documentation:"The empty statement (empty block or simply a semicolon)",_walk:function(n){return n._visit(this)}},X),en=A("StatementWithBody","body",{$documentation:"Base class for all statements that contain one nested body: `For`, `ForIn`, `Do`, `While`, `With`",$propdoc:{body:"[AST_Statement] the body; this should always be present, even if it's an AST_EmptyStatement"},_walk:function(n){return n._visit(this,function(){this.body._walk(n)})}},X),tn=A("LabeledStatement","label",{$documentation:"Statement with a label",$propdoc:{label:"[AST_Label] a label definition"},_walk:function(n){return n._visit(this,function(){this.label._walk(n),this.body._walk(n)})}},en),rn=A("IterationStatement",null,{$documentation:"Internal class.  All loops inherit from it."},en),on=A("DWLoop","condition",{$documentation:"Base class for do/while statements",$propdoc:{condition:"[AST_Node] the loop condition.  Should not be instanceof AST_Statement"}},rn),an=A("Do",null,{$documentation:"A `do` statement",_walk:function(n){return n._visit(this,function(){this.body._walk(n),this.condition._walk(n)})}},on),un=A("While",null,{$documentation:"A `while` statement",_walk:function(n){return n._visit(this,function(){this.condition._walk(n),this.body._walk(n)})}},on),sn=A("For","init condition step",{$documentation:"A `for` statement",$propdoc:{init:"[AST_Node?] the `for` initialization code, or null if empty",condition:"[AST_Node?] the `for` termination clause, or null if empty",step:"[AST_Node?] the `for` update clause, or null if empty"},_walk:function(n){return n._visit(this,function(){this.init&&this.init._walk(n),this.condition&&this.condition._walk(n),this.step&&this.step._walk(n),this.body._walk(n)})}},rn),cn=A("ForIn","init name object",{$documentation:"A `for ... in` statement",$propdoc:{init:"[AST_Node] the `for/in` initialization code",name:"[AST_SymbolRef?] the loop variable, only if `init` is AST_Var",object:"[AST_Node] the object that we're looping through"},_walk:function(n){return n._visit(this,function(){this.init._walk(n),this.object._walk(n),this.body._walk(n)})}},rn),fn=A("With","expression",{$documentation:"A `with` statement",$propdoc:{expression:"[AST_Node] the `with` expression"},_walk:function(n){return n._visit(this,function(){this.expression._walk(n),this.body._walk(n)})}},en),ln=A("Scope","directives variables functions uses_with uses_eval parent_scope enclosed cname",{$documentation:"Base class for all statements introducing a lexical scope",$propdoc:{directives:"[string*/S] an array of directives declared in this scope",variables:"[Object/S] a map of name -> SymbolDef for all variables/functions defined in this scope",functions:"[Object/S] like `variables`, but only lists function declarations",uses_with:"[boolean/S] tells whether this scope uses the `with` statement",uses_eval:"[boolean/S] tells whether this scope contains a direct call to the global `eval`",parent_scope:"[AST_Scope?/S] link to the parent scope",enclosed:"[SymbolDef*/S] a list of all symbol definitions that are accessed from this scope or any subscopes",cname:"[integer/S] current index for mangling variables (used internally by the mangler)"}},Z),pn=A("Toplevel","globals",{$documentation:"The toplevel scope",$propdoc:{globals:"[Object/S] a map of name -> SymbolDef for all undeclared names"},wrap_enclose:function(n){var e=this,t=[],r=[];n.forEach(function(n){var e=n.lastIndexOf(":");t.push(n.substr(0,e)),r.push(n.substr(e+1))});var o="(function("+r.join(",")+"){ '$ORIG'; })("+t.join(",")+")";return o=R(o),o=o.transform(new P(function(n){return n instanceof J&&"$ORIG"==n.value?V.splice(e.body):void 0}))},wrap_commonjs:function(n,e){var t=this,r=[];e&&(t.figure_out_scope(),t.walk(new E(function(n){n instanceof te&&n.definition().global&&(a(function(e){return e.name==n.name},r)||r.push(n))})));var o="(function(exports, global){ global['"+n+"'] = exports; '$ORIG'; '$EXPORTS'; }({}, (function(){return this}())))";return o=R(o),o=o.transform(new P(function(n){if(n instanceof K&&(n=n.body,n instanceof he))switch(n.getValue()){case"$ORIG":return V.splice(t.body);case"$EXPORTS":var e=[];return r.forEach(function(n){e.push(new K({body:new Yn({left:new jn({expression:new fe({name:"exports"}),property:new he({value:n.name})}),operator:"=",right:new fe(n)})}))}),V.splice(e)}}))}},ln),dn=A("Lambda","name argnames uses_arguments",{$documentation:"Base class for functions",$propdoc:{name:"[AST_SymbolDeclaration?] the name of this function",argnames:"[AST_SymbolFunarg*] array of function arguments",uses_arguments:"[boolean/S] tells whether this function accesses the arguments array"},_walk:function(n){return n._visit(this,function(){this.name&&this.name._walk(n),this.argnames.forEach(function(e){e._walk(n)}),w(this,n)})}},ln),hn=A("Accessor",null,{$documentation:"A setter/getter function.  The `name` property is always null."},dn),_n=A("Function",null,{$documentation:"A function expression"},dn),mn=A("Defun",null,{$documentation:"A function definition"},dn),vn=A("Jump",null,{$documentation:"Base class for ¡§jumps¡¨ (for now that's `return`, `throw`, `break` and `continue`)"},X),gn=A("Exit","value",{$documentation:"Base class for ¡§exits¡¨ (`return` and `throw`)",$propdoc:{value:"[AST_Node?] the value returned or thrown by this statement; could be null for AST_Return"},_walk:function(n){return n._visit(this,this.value&&function(){this.value._walk(n)})}},vn),bn=A("Return",null,{$documentation:"A `return` statement"},gn),yn=A("Throw",null,{$documentation:"A `throw` statement"},gn),An=A("LoopControl","label",{$documentation:"Base class for loop control statements (`break` and `continue`)",$propdoc:{label:"[AST_LabelRef?] the label, or null if none"},_walk:function(n){return n._visit(this,this.label&&function(){this.label._walk(n)})}},vn),wn=A("Break",null,{$documentation:"A `break` statement"},An),En=A("Continue",null,{$documentation:"A `continue` statement"},An),Dn=A("If","condition alternative",{$documentation:"A `if` statement",$propdoc:{condition:"[AST_Node] the `if` condition",alternative:"[AST_Statement?] the `else` part, or null if not present"},_walk:function(n){return n._visit(this,function(){this.condition._walk(n),this.body._walk(n),this.alternative&&this.alternative._walk(n)})}},en),Fn=A("Switch","expression",{$documentation:"A `switch` statement",$propdoc:{expression:"[AST_Node] the `switch` ¡§discriminant¡¨"},_walk:function(n){return n._visit(this,function(){this.expression._walk(n),w(this,n)})}},Z),Cn=A("SwitchBranch",null,{$documentation:"Base class for `switch` branches"},Z),Sn=A("Default",null,{$documentation:"A `default` switch branch"
